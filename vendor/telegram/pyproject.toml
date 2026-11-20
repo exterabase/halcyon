@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=68", "Cython>=3,<4"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "halcyon-tl"
+version = "2.2.1"
+requires-python = ">=3.10"
+dependencies = ["beautifulsoup4>=4.12,<5", "pyaes", "rsa>=4.9,<5"]
+
+[tool.setuptools.packages.find]
+include = ["halcyon_tl*"]
