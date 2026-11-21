@@ -22,7 +22,6 @@ import random
 import shutil
 import signal
 import sqlite3
-import string
 import sys
 import traceback
 import typing
@@ -55,7 +54,6 @@ from halcyon_tl.password import compute_check
 from halcyon_tl.sessions import MemorySession, SQLiteSession, StringSession
 from halcyon_tl.tl.functions.account import GetPasswordRequest
 from halcyon_tl.tl.functions.auth import CheckPasswordRequest
-from halcyon_tl.tl.functions.contacts import UnblockRequest
 
 from . import database, loader, utils, version
 from ._internal import (
@@ -70,6 +68,9 @@ from ._internal import (
     register_secrets,
 )
 from .dispatcher import CommandDispatcher
+from .inline.token_obtainment import (
+    BOT_TOKEN, normalize_bot_username, owns_inline_bot, valid_bot_username,
+)
 from .secure import patcher
 from .tl_cache import CustomTelegramClient
 from .utils.other import allowed_ids as get_allowed_ids
@@ -453,6 +454,10 @@ def parse_arguments() -> dict:
         help="Do not print colorful output using ANSI escapes",
     )
     parser.add_argument(
+        "--set-bot-token", action="store_true",
+        help="Read a new inline bot token from the terminal without echoing it",
+    )
+    parser.add_argument(
         "--no-git",
         dest="no_git",
         action="store_true",
@@ -721,17 +726,9 @@ class Halcyon:
             while bot := input(
                 "You can enter a custom bot username or leave it empty and halcyon. will generate a random one: "
             ):
-                bot = bot.strip()
-                bot = bot.lstrip("@")
-                if any(
-                    ch not in (string.ascii_letters + string.digits + "_") for ch in bot
-                ):
-                    print(
-                        "Invalid username: use only ASCII letters, digits and underscore (_)."
-                    )
-                    continue
-                if not (bot.lower().endswith("bot")):
-                    print("Invalid username: must end with 'bot'.")
+                bot = normalize_bot_username(bot)
+                if not valid_bot_username(bot):
+                    print("Invalid username. Use the username assigned by BotFather.")
                     continue
                 try:
                     if await self._check_bot(client, bot):
@@ -768,6 +765,10 @@ class Halcyon:
         while bot := input(
             "You can enter a custom bot username or leave it empty and halcyon. will generate a random one: "
         ):
+            bot = normalize_bot_username(bot)
+            if not valid_bot_username(bot):
+                print("Invalid username. Use the username assigned by BotFather.")
+                continue
             try:
                 if await self._check_bot(client, bot):
                     db.set("halcyon.inline", "custom_bot", bot)
@@ -788,36 +789,11 @@ class Halcyon:
         client: CustomTelegramClient,
         username: str,
     ) -> bool:
-        username = username.strip("@")
-        async with client.conversation("@BotFather", exclusive=False) as conv:
-            try:
-                m = await conv.send_message("/token")
-            except YouBlockedUserError:
-                await client(UnblockRequest(id="@BotFather"))
-                m = await conv.send_message("/token")
-            r = await conv.get_response()
-
-            await m.delete()
-            await r.delete()
-
-            if hasattr(r, "reply_markup") and hasattr(r.reply_markup, "rows"):
-                for row in r.reply_markup.rows:
-                    for button in row.buttons:
-                        if username != button.text.strip("@"):
-                            continue
-
-                        m = await conv.send_message("/cancel")
-                        r = await conv.get_response()
-
-                        await m.delete()
-                        await r.delete()
-
-                        return True
-
         try:
-            await client.get_entity(f"{username}")
-        except Exception:
+            await client.get_entity(username)
+        except ValueError:
             return True
+        return await owns_inline_bot(client, username)
 
     async def _initial_setup(self) -> bool:
         """Responsible for first start"""
@@ -1177,6 +1153,13 @@ class Halcyon:
         db = database.Database(client)
         client.halcyon_db = db
         await db.init()
+        token = None
+        if self.arguments.set_bot_token:
+            token = getpass("New inline bot token: ").strip()
+            if not BOT_TOKEN.fullmatch(token):
+                raise SystemExit("Invalid BotFather token. Existing configuration was kept.")
+            register_secret(token)
+
         logging.debug("Got DB")
         logging.debug("Loading logging config...")
 
@@ -1191,15 +1174,15 @@ class Halcyon:
         await modules.register_all(None)
         modules.send_config()
         try:
-            await modules.inline.register_manager()
+            await modules.inline.register_manager(override_token=token)
         except Exception:
             logging.critical(
                 "Inline manager initialization failed, continuing without the inline bot",
                 exc_info=True,
             )
-            modules.inline.init_complete = False
+            with contextlib.suppress(Exception):
+                await modules.inline._stop()
 
-        await db.ensure_content_channel()
         await modules.send_ready()
         await modules.send_inline_ready()
 
@@ -1245,6 +1228,9 @@ class Halcyon:
         ) and not await self._initial_setup():
             return
 
+        if self.arguments.set_bot_token and (len(self.clients) != 1 or not sys.stdin.isatty()):
+            raise SystemExit("--set-bot-token requires a terminal and exactly one authorized account.")
+
         self.loop.set_exception_handler(self._loop_exception_handler)
         self._allowed_ids = None
         self._allowed_ids_lock = asyncio.Lock()
@@ -1254,14 +1240,8 @@ class Halcyon:
         for client in self.clients:
             inline = getattr(client.loader, "inline", None)
             if inline:
-                for t in (inline._task, inline._cleaner_task):
-                    if t:
-                        t.cancel()
-                try:
-                    await inline._dp.stop_polling()
-                    await inline.bot.session.close()
-                except Exception:
-                    pass
+                with contextlib.suppress(Exception):
+                    await inline._stop()
         for c in self.clients:
             await c.disconnect()
         for task in asyncio.all_tasks():

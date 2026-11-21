@@ -401,8 +401,8 @@ halcyon_config:
   _cfg_emoji: "Emoji beim Öffnen der Konfiguration ändern"
 
 inline_stuff:
-  bot_username_invalid: "<tg-emoji emoji-id=5121063440311386962>❌</tg-emoji> <b>Ungültiger Bot-Benutzername. Er muss auf</b> <code>bot</code> <b>enden und mindestens 5 Zeichen lang sein</b>"
-  token_invalid: "<tg-emoji emoji-id=5121063440311386962>❌</tg-emoji> <b>Das angegebene Bot-Token ist ungültig. Es muss 8-10 Zahlen, </b><code>:</code> <b>und 34-36 Symbole enthalten</b>"
+  bot_username_invalid: "❌ <b>Use the bot username assigned by BotFather.</b>"
+  token_invalid: "❌ <b>Enter a valid token from BotFather.</b>"
   bot_username_occupied: "<tg-emoji emoji-id=5121063440311386962>❌</tg-emoji> <b>Dieser Bot-Benutzername ist bereits vergeben</b>"
   bot_updated: "<tg-emoji emoji-id=6318792204118656433>🎉</tg-emoji> <b>Einstellungen gespeichert. Um sie anzuwenden, starte den Userbot neu</b>"
   this_is_halcyon: "{} <b>Hallo! Das ist {} — ein leistungsstarker modularer Telegram-Userbot. Du kannst ihn auf deinem Account installieren!</b>"

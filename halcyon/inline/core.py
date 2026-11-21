@@ -27,7 +27,7 @@ from halcyon_tl.errors.rpcerrorlist import (
     UserIsBlockedError,
     YouBlockedUserError,
 )
-from halcyon_tl.sessions import SQLiteSession
+from halcyon_tl.sessions import MemorySession, SQLiteSession
 from halcyon_tl.tl.functions.contacts import UnblockRequest
 from halcyon_tl.tl.functions.messages import (
     GetDialogFiltersRequest,
@@ -55,6 +55,7 @@ from halcyon_tl.tl.types import (
 from halcyon_tl.utils import get_display_name
 
 from .. import main, utils
+from .._internal import register_secret
 from ..types import InlineDownError
 from ..database import Database
 from ..tl_cache import CustomTelegramClient
@@ -66,7 +67,7 @@ from .gallery import Gallery
 from .list import List
 from .query_gallery import QueryGallery
 from .tl import TelethonBot, web_document
-from .token_obtainment import TokenObtainment
+from .token_obtainment import BOT_TOKEN, TokenObtainment
 from .utils import Utils
 
 logger = logging.getLogger(__name__)
@@ -250,6 +251,7 @@ class InlineManager(
         after_break: bool = False,
         ignore_token_checks: bool = False,
         force_new_bot: bool = False,
+        override_token: str | None = None,
     ):
         """
         Register manager
@@ -266,36 +268,49 @@ class InlineManager(
         self._me = self._client.tg_id
         self._name = get_display_name(self._client.halcyon_me)
 
-        if not ignore_token_checks:
+        if override_token is None and not ignore_token_checks:
             is_token_asserted = await self._assert_token(skip_search=force_new_bot)
             if not is_token_asserted:
                 self.init_complete = False
                 return
 
+        await self._stop()
         self.init_complete = False
+        self._bot = None
+        self.bot_username = None
+        self.bot_id = None
 
-        if self._bot_client:
-            try:
-                await self._bot_client.disconnect()
-            except Exception:
-                pass
-
-        bot_uid = self._token.split(":", 1)[0]
-        self._cleanup_stale_bot_sessions(bot_uid)
+        token = override_token or self._token
+        if not isinstance(token, str) or not BOT_TOKEN.fullmatch(token):
+            logger.warning("Inline bot token is missing or malformed. Use --set-bot-token.")
+            return False
+        register_secret(token)
+        bot_uid = token.split(":", 1)[0]
+        session = (
+            MemorySession()
+            if override_token is not None
+            else SQLiteSession(os.path.join(main.SESSIONS_DIR, f"halcyon-{self._me}-bot-{bot_uid}"))
+        )
         self._bot_client = TelegramClient(
-            SQLiteSession(
-                os.path.join(main.SESSIONS_DIR, f"halcyon-{self._me}-bot-{bot_uid}")
-            ),
+            session,
             self._client.api_id,
             self._client.api_hash,
             receive_updates=True,
+            connection=main.halcyon.conn,
+            proxy=main.halcyon.proxy,
+            connection_retries=3,
+            flood_sleep_threshold=0,
         )
 
         try:
-            await self._bot_client.start(bot_token=self._token)
-            self._bot = TelethonBot(self._bot_client)
-            self._register_builtin_handlers()
+            await self._bot_client.start(bot_token=token)
             bot_me = await self._bot_client.get_me()
+            if not (
+                bot_me and bot_me.bot and str(bot_me.id) == bot_uid and bot_me.username
+            ):
+                logger.error("Inline session does not match the configured bot. Use --set-bot-token.")
+                await self._stop()
+                return False
             telegram_id = bot_me.id
             self._bot_client._tg_id = telegram_id
             self._bot_client.tg_id = telegram_id
@@ -303,14 +318,28 @@ class InlineManager(
             self._bot_client.halcyon_me = bot_me
             self.bot_username = bot_me.username
             self.bot_id = bot_me.id
+            self._bot = TelethonBot(self._bot_client)
+            self._register_builtin_handlers()
         except (
             AccessTokenExpiredError,
             AccessTokenInvalidError,
             AuthKeyUnregisteredError,
         ):
-            logger.critical("Token expired, revoking...")
-            return await self._dp_revoke_token(False)
+            await self._stop()
+            if override_token is None and not after_break and not ignore_token_checks:
+                previous_token = self._token
+                self._token = None
+                try:
+                    if await self._assert_token(create_new_if_needed=False, expected_id=bot_uid):
+                        if self._token != previous_token:
+                            return await self.register_manager(True, ignore_token_checks=True)
+                finally:
+                    if not self._token:
+                        self._token = previous_token
+            logger.warning("Inline bot authorization failed. Use --set-bot-token.")
+            return False
         except FloodWaitError as e:
+            await self._stop()
             logger.error(
                 "Inline bot authorization flood wait: %ss. "
                 "Inline manager initialization skipped for this run.",
@@ -319,6 +348,7 @@ class InlineManager(
             self.init_complete = False
             return False
         except sqlite3.OperationalError:
+            await self._stop()
             logger.critical(
                 "Bot session database is locked, could not start bot client",
                 exc_info=True,
@@ -326,17 +356,28 @@ class InlineManager(
             self.init_complete = False
             return False
 
-        if self._db.get("halcyon.inline", "needs_inline_setup", False):
-            try:
-                await self._configure_inline_bot(self.bot_username)
-            except Exception:
-                pass
+        if not getattr(bot_me, "bot_inline_placeholder", None):
+            self._db.set("halcyon.inline", "needs_inline_setup", True)
+        if override_token is not None:
+            self._store_bot_token(token, self.bot_username)
+        self._cleanup_stale_bot_sessions(bot_uid)
 
-            self._db.set("halcyon.inline", "needs_inline_setup", False)
+        if self._db.get("halcyon.inline", "needs_inline_setup", False):
+            configured = getattr(bot_me, "bot_inline_placeholder", None)
+            if not configured:
+                try:
+                    configured = await self._configure_inline_bot(self.bot_username)
+                except Exception:
+                    logger.warning("BotFather inline setup could not be completed")
+            if configured:
+                self._db.set("halcyon.inline", "needs_inline_setup", False)
+            else:
+                logger.warning("Enable inline mode for @%s via BotFather /setinline", self.bot_username)
 
         result = await self._ping_bot(after_break)
         if result is not True:
-            return result
+            await self._stop()
+            return False
 
         self.init_complete = True
 
@@ -378,10 +419,9 @@ class InlineManager(
         self._cleaner_task = asyncio.ensure_future(self._cleaner())
         asyncio.ensure_future(self._allmodules.send_inline_ready())
 
-    async def _ping_bot(
-        self,
-        after_break: bool = False,
-    ) -> bool:
+    async def _ping_bot(self, after_break: bool = False) -> bool:
+        if not self.bot_username or self._bot is None:
+            return False
         try:
             await self.bot(
                 SetTypingRequest(self._client.tg_id, SendMessageTypingAction())
@@ -396,18 +436,7 @@ class InlineManager(
         try:
             m = await self._client.send_message(self.bot_username, "/start halcyon init")
         except (InputUserDeactivatedError, ValueError):
-            logger.warning(
-                "Inline bot @%s is deactivated (frozen) or not found, "
-                "creating a new one",
-                self.bot_username,
-            )
-            self._db.set("halcyon.inline", "bot_token", None)
-            self._token = False
-
-            if not after_break:
-                return await self.register_manager(True, force_new_bot=True)
-
-            self.init_complete = False
+            logger.warning("Inline bot @%s is unavailable", self.bot_username)
             return False
         except YouBlockedUserError:
             await self._client(UnblockRequest(id=self.bot_username))
@@ -427,13 +456,19 @@ class InlineManager(
         return True
 
     async def _stop(self):
-        """Stop the bot"""
+        """Stop the bot and clear its live identity."""
+        self.init_complete = False
+        self._bot = None
+        self.bot_username = None
+        self.bot_id = None
         if self._task:
             self._task.cancel()
-        if self._bot_client:
-            await self._bot_client.disconnect()
         if self._cleaner_task:
             self._cleaner_task.cancel()
+            self._cleaner_task = None
+        if self._bot_client:
+            client, self._bot_client = self._bot_client, None
+            await client.disconnect()
 
     async def _restart_polling(self):
         """Kept for API compatibility; Telethon handlers are updated in-place."""

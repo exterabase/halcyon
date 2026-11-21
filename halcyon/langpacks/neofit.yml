@@ -399,8 +399,8 @@ halcyon_config:
 
 inline_stuff:
   name: "InlineStuff"
-  bot_username_invalid: "<tg-emoji emoji-id=5121063440311386962>❌</tg-emoji> <b>RegexError: Username must match `.*bot` and len >= 4</b>"
-  token_invalid: "<tg-emoji emoji-id=5121063440311386962>❌</tg-emoji> <b>ValueError: Invalid Token format</b>"
+  bot_username_invalid: "❌ <b>Use the bot username assigned by BotFather.</b>"
+  token_invalid: "❌ <b>Enter a valid token from BotFather.</b>"
   bot_username_occupied: "<tg-emoji emoji-id=5121063440311386962>❌</tg-emoji> <b>Username occupied</b>"
   bot_updated: "<tg-emoji emoji-id=6318792204118656433>🎉</tg-emoji> <b>Config saved. Reboot required.</b>"
   this_is_halcyon: "{} <b>{} Userbot. Modular Telegram automation.</b>"

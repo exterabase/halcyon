@@ -8,354 +8,175 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
-import asyncio
 import logging
-import random
 import re
-import typing
-from pathlib import Path
+from contextlib import asynccontextmanager
 
 from halcyon_tl.errors.rpcerrorlist import YouBlockedUserError
 from halcyon_tl.tl.functions.contacts import UnblockRequest
 
 from .. import utils
-from .._internal import fw_protect
+from .._internal import fw_protect, register_secret
 from .types import InlineUnit
 
-if typing.TYPE_CHECKING:
-    from ..inline.core import InlineManager
-
 logger = logging.getLogger(__name__)
-BOT_BASE_PATTERN = re.compile(r"(\w*)_[0-9a-zA-Z]{6}_bot")
+BOT_BASE_PATTERN = re.compile(r"(\w*)_[0-9a-zA-Z]{6}_bot", re.IGNORECASE)
+BOT_USERNAME = re.compile(r"[a-z0-9_]{5,32}", re.IGNORECASE | re.ASCII)
+BOT_SUFFIXES = ("bot", "agent", "ai", "app", "game")
+BOT_TOKEN = re.compile(r"(?<![\w:])[0-9]{6,}:[A-Za-z0-9_-]{35}(?![\w-])")
+
+
+def normalize_bot_username(username: str) -> str:
+    return username.strip().removeprefix("@")
+
+
+def valid_bot_username(username: str) -> bool:
+    return bool(BOT_USERNAME.fullmatch(username) and username.lower().endswith(BOT_SUFFIXES))
+
+
+def _botfather_choices(response):
+    markup = getattr(response, "reply_markup", None)
+    for row in getattr(markup, "rows", ()) or ():
+        for button in row.buttons:
+            if valid_bot_username(normalize_bot_username(button.text)):
+                yield button.text
+
+
+@asynccontextmanager
+async def botfather(client):
+    async with client.conversation("@BotFather", timeout=35) as conv:
+        try:
+            await _botfather_step(conv, "/cancel")
+        except YouBlockedUserError:
+            await client(UnblockRequest(id="@BotFather"))
+            await _botfather_step(conv, "/cancel")
+        yield conv
+
+
+async def _botfather_step(conv, text):
+    await fw_protect()
+    message = await conv.send_message(text)
+    response = await conv.get_response(message)
+    if token := BOT_TOKEN.search(response.raw_text or ""):
+        register_secret(token[0])
+    try:
+        await message.delete()
+        await response.delete()
+    except Exception:
+        logger.debug("Could not remove BotFather exchange")
+    return response
+
+
+async def owns_inline_bot(client, username):
+    username = normalize_bot_username(username).casefold()
+    async with botfather(client) as conv:
+        response = await _botfather_step(conv, "/token")
+        found = any(
+            normalize_bot_username(choice).casefold() == username
+            for choice in _botfather_choices(response)
+        )
+        await _botfather_step(conv, "/cancel")
+    return found
 
 
 class TokenObtainment(InlineUnit):
-    async def _create_bot(self: "InlineManager"):
-        logger.info("User doesn't have bot, attempting creating new one")
-        async with self._client.conversation("@BotFather", exclusive=False) as conv:
-            await fw_protect()
-            m = await conv.send_message("/newbot")
-            r = await conv.get_response()
+    def _store_bot_token(self, token, username=None):
+        register_secret(token)
+        self._db.set("halcyon.inline", "bot_token", token)
+        if username:
+            self._db.set("halcyon.inline", "custom_bot", username)
+        self._token = token
 
+    async def _create_bot(self):
+        username = normalize_bot_username(self._db.get("halcyon.inline", "custom_bot") or "")
+        if username:
+            if not valid_bot_username(username):
+                return False
+            try:
+                await self._client.get_entity(username)
+            except ValueError:
+                pass
+            else:
+                logger.warning("Configured bot exists. Attach it with --set-bot-token.")
+                return False
+        else:
+            username = f"halcyon_{utils.rand(6)}_bot"
 
-            if "cannot create new bots" in r.raw_text.lower() or "20" in r.raw_text:
-                prefix = self._client.loader.get_prefix()
-
-                text = (
-                    "<b>🚫 @BotFather won't create an inline bot for this"
-                    " account because of spamban or has exceeded the 20-bot limit</b>.\n\n"
-                    "You can still enable inline features with an existing"
-                    " bot:\n\n"
-                    "• <b>You already own a bot</b> - attach it:"
-                    f" <code>{prefix}ch_halcyon_bot &lt;username&gt;</code>"
-                    f" (or paste its token: <code>{prefix}ch_bot_token"
-                    " &lt;token&gt;</code>).\n\n"
-                    "• <b>You don't</b> - create a bot on another account"
-                    " via @BotFather, then transfer it to this account"
-                    " (@BotFather > <code>/mybots</code> > the bot >"
-                    " <b>Transfer Ownership</b>) and run"
-                    f" <code>{prefix}ch_halcyon_bot &lt;username&gt;</code>"
-                    " here."
-                )
-
-                try:
-                    await self._client.send_message(
-                        "me",
-                        text,
-                    )
-                except Exception:
-                    logger.exception("Unable to send a warn to user's Saved Messages")
-
-                logger.error(utils.remove_html(text))
-
+        async with botfather(self._client) as conv:
+            response = await _botfather_step(conv, "/newbot")
+            if "name" not in (response.raw_text or "").lower():
+                return False
+            response = await _botfather_step(conv, "halcyon.")
+            if "username" not in (response.raw_text or "").lower():
+                return False
+            response = await _botfather_step(conv, username)
+            token = BOT_TOKEN.search(response.raw_text or "")
+            if not token:
+                await _botfather_step(conv, "/cancel")
+                logger.warning("BotFather did not create the configured bot. Use --set-bot-token.")
                 return False
 
-            await fw_protect()
+        self._store_bot_token(token[0], username)
+        self._db.set("halcyon.inline", "needs_inline_setup", True)
+        return True
 
-            await m.delete()
-            await r.delete()
-
-            from .. import main
-
-            if self._db.get("halcyon.inline", "custom_bot", False):
-                username = self._db.get("halcyon.inline", "custom_bot").strip("@")
-                username = f"@{username}"
-                try:
-                    await self._client.get_entity(username)
-                except ValueError:
-                    pass
-                else:
-                    uid = utils.rand(6)
-                    genran = "".join(random.choice(main.LATIN_MOCK))
-                    username = f"@{genran}_{uid}_bot"
-            else:
-                uid = utils.rand(6)
-                genran = "".join(random.choice(main.LATIN_MOCK))
-                username = f"@{genran}_{uid}_bot"
-
-            for msg in [
-                "🪐 halcyon. userbot"[:64],
-                username,
-                "/setinline",
-                username,
-                "halcyon.",
-                "/setinlinefeedback",
-                username,
-                "Enabled",
-                "/setuserpic",
-                username,
-            ]:
-                await fw_protect()
-                m = await conv.send_message(msg)
-                r = await conv.get_response()
-
-
-                if not self._token and (
-                    match := re.search(r"\d{6,}:[A-Za-z0-9_-]{35}", r.raw_text)
-                ):
-                    self._token = match.group(0)
-                    self._db.set("halcyon.inline", "bot_token", self._token)
-
-                await fw_protect()
-                await m.delete()
-                await r.delete()
-
-            try:
-                await fw_protect()
-                m = await conv.send_file(
-                    Path(__file__).resolve().parents[2] / "assets" / "halcyon.jpeg"
-                )
-                r = await conv.get_response()
-
-                logger.debug(">> <Photo>")
-            except Exception:
-                await fw_protect()
-                m = await conv.send_message("/cancel")
-                r = await conv.get_response()
-
-
-            await fw_protect()
-
-            await m.delete()
-            await r.delete()
-
+    async def _assert_token(self, create_new_if_needed=True, skip_search=False, expected_id=None):
         if self._token:
             return True
 
-        return await self._assert_token(create_new_if_needed=False)
+        if not skip_search:
+            from ..main import LATIN_MOCK
 
-    async def _assert_token(
-        self: "InlineManager",
-        create_new_if_needed: bool = True,
-        revoke_token: bool = False,
-        skip_search: bool = False,
-    ) -> bool:
-        if self._token:
-            return True
-
-        if skip_search:
-            logger.info("Skipping search for an existing bot, creating a new one")
-            return await self._create_bot() if create_new_if_needed else False
-
-        logger.info("Bot token not found in db, attempting search in BotFather")
-
-        if not self._db.get(__name__, "no_mute", False):
-            await utils.dnd(
-                self._client,
-                await self._client.get_entity("@BotFather"),
-                True,
-            )
-            self._db.set(__name__, "no_mute", True)
-
-        async with self._client.conversation("@BotFather", exclusive=False) as conv:
-            try:
-                await fw_protect()
-                m = await conv.send_message("/token")
-            except YouBlockedUserError:
-                await self._client(UnblockRequest(id="@BotFather"))
-                await fw_protect()
-                m = await conv.send_message("/token")
-
-            r = await conv.get_response()
-
-
-            await fw_protect()
-
-            await m.delete()
-            await r.delete()
-
-            if not hasattr(r, "reply_markup") or not hasattr(r.reply_markup, "rows"):
-                await conv.cancel_all()
-
-                return await self._create_bot() if create_new_if_needed else False
-
-            from .. import main
-
-            for row in r.reply_markup.rows:
-                for button in row.buttons:
-                    btn_text = button.text.strip("@")
-
-                    if self._db.get("halcyon.inline", "custom_bot", False) and (
-                        self._db.get("halcyon.inline", "custom_bot", False) != btn_text
-                    ):
+            custom = normalize_bot_username(self._db.get("halcyon.inline", "custom_bot") or "")
+            prefixes = {prefix.casefold() for prefix in LATIN_MOCK} | {"halcyon"}
+            async with botfather(self._client) as conv:
+                response = await _botfather_step(conv, "/token")
+                for choice in _botfather_choices(response):
+                    username = normalize_bot_username(choice)
+                    match = BOT_BASE_PATTERN.fullmatch(username)
+                    if custom:
+                        if username.casefold() != custom.casefold():
+                            continue
+                    elif not match or match[1].casefold() not in prefixes:
                         continue
-
-                    if not self._db.get("halcyon.inline", "custom_bot", False) and not (
-                        (match := BOT_BASE_PATTERN.fullmatch(btn_text))
-                        and match.group(1) in main.LATIN_MOCK
-                    ):
-                        continue
-
-                    await fw_protect()
-
-                    m = await conv.send_message(button.text)
-                    r = await conv.get_response()
-
-
-                    if revoke_token:
-                        await fw_protect()
-                        await m.delete()
-                        await r.delete()
-
-                        await fw_protect()
-
-                        m = await conv.send_message("/revoke")
-                        r = await conv.get_response()
-
-
-                        await fw_protect()
-
-                        await m.delete()
-                        await r.delete()
-
-                        await fw_protect()
-
-                        m = await conv.send_message(button.text)
-                        r = await conv.get_response()
-
-
-                    token = r.raw_text.splitlines()[1]
-
-                    self._db.set("halcyon.inline", "bot_token", token)
-                    self._token = token
-
-                    await fw_protect()
-
-                    await m.delete()
-                    await r.delete()
-
-                    for msg in [
-                        "/setinline",
-                        button.text,
-                        "halcyon.",
-                        "/setinlinefeedback",
-                        button.text,
-                        "Enabled",
-                        "/setuserpic",
-                        button.text,
-                    ]:
-                        await fw_protect()
-                        m = await conv.send_message(msg)
-                        r = await conv.get_response()
-
-
-                        await fw_protect()
-
-                        await m.delete()
-                        await r.delete()
-
-                    try:
-                        await fw_protect()
-                        m = await conv.send_file(
-                            Path(__file__).resolve().parents[2]
-                            / "assets"
-                            / "halcyon.jpeg"
-                        )
-                        r = await conv.get_response()
-
-                        logger.debug(">> <Photo>")
-                    except Exception:
-                        await fw_protect()
-                        m = await conv.send_message("/cancel")
-                        r = await conv.get_response()
-
-
-                    await fw_protect()
-
-                    await m.delete()
-                    await r.delete()
-
-                    # TODO: add bot commands setup
-                    return True
+                    reply = await _botfather_step(conv, choice)
+                    token = BOT_TOKEN.search(reply.raw_text or "")
+                    if token and (expected_id is None or token[0].split(":", 1)[0] == expected_id):
+                        self._store_bot_token(token[0], username)
+                        return True
+                    break
+                await _botfather_step(conv, "/cancel")
 
         return await self._create_bot() if create_new_if_needed else False
 
-    async def _configure_inline_bot(self: "InlineManager", username: str):
-        username = f"@{username.strip('@')}"
-        async with self._client.conversation("@BotFather", exclusive=False) as conv:
-            for msg in [
-                "/setinline",
+    async def _configure_inline_bot(self, username):
+        async with botfather(self._client) as conv:
+            response = await _botfather_step(conv, "/setinline")
+            choice = next(
+                (choice for choice in _botfather_choices(response)
+                 if normalize_bot_username(choice).casefold() == username.casefold()),
                 username,
-                "halcyon.",
-                "/setinlinefeedback",
-                username,
-                "Enabled",
-            ]:
-                await fw_protect()
-                m = await conv.send_message(msg)
-                r = await conv.get_response()
-
-
-                await fw_protect()
-
-                await m.delete()
-                await r.delete()
-
-    async def _reassert_token(self: "InlineManager"):
-        is_token_asserted = await self._assert_token(revoke_token=True)
-        if not is_token_asserted:
-            self.init_complete = False
-        else:
-            await self.register_manager(ignore_token_checks=True)
-
-    async def _dp_revoke_token(self: "InlineManager", already_initialised: bool = True):
-        if already_initialised:
-            await self._stop()
-            logger.error("Got polling conflict. Attempting token revocation...")
-
-        self._db.set("halcyon.inline", "bot_token", None)
-        self._token = None
-        if already_initialised:
-            asyncio.ensure_future(self._reassert_token())
-        else:
-            return await self._reassert_token()
-
-    async def _check_bot(self: "InlineManager", username: str):
-        username = username.strip("@")
-        async with self._client.conversation("@BotFather", exclusive=False) as conv:
-            try:
-                m = await conv.send_message("/token")
-            except YouBlockedUserError:
-                await self._client(UnblockRequest(id="@BotFather"))
-                m = await conv.send_message("/token")
-
-            r = await conv.get_response()
-
-            await m.delete()
-            await r.delete()
-
-            if not hasattr(r, "reply_markup") or not hasattr(r.reply_markup, "rows"):
+            )
+            response = await _botfather_step(conv, choice)
+            if "placeholder" not in (response.raw_text or "").lower():
+                await _botfather_step(conv, "/cancel")
+                return False
+            response = await _botfather_step(conv, "halcyon.")
+            if not any(word in (response.raw_text or "").lower() for word in ("success", "enabled")):
                 return False
 
-            for row in r.reply_markup.rows:
-                for button in row.buttons:
-                    if username != button.text.strip("@"):
-                        continue
+            response = await _botfather_step(conv, "/setinlinefeedback")
+            choice = next(
+                (choice for choice in _botfather_choices(response)
+                 if normalize_bot_username(choice).casefold() == username.casefold()),
+                username,
+            )
+            response = await _botfather_step(conv, choice)
+            if "enable" in (response.raw_text or "").lower():
+                await _botfather_step(conv, "Enabled")
+            else:
+                await _botfather_step(conv, "/cancel")
+            return True
 
-                    m = await conv.send_message("/cancel")
-                    r = await conv.get_response()
-
-                    await m.delete()
-                    await r.delete()
-
-                    return True
+    async def _check_bot(self, username):
+        return await owns_inline_bot(self._client, username)

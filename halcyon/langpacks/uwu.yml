@@ -398,8 +398,8 @@ halcyon_config:
 
 inline_stuff:
   name: "InwineStuff"
-  bot_username_invalid: "<tg-emoji emoji-id=5121063440311386962>❌</tg-emoji> <b>Specified bot usewnyame is invawid. It must end with</b> <code>bot</code> <b>and contain at weast 4 symbows</b>"
-  token_invalid: "<tg-emoji emoji-id=5121063440311386962>❌</tg-emoji> <b>Specified bot token is invawid. It must contain 8-10 nyumbews, </b><code>:</code> <b>and 34-36 symbows</b>"
+  bot_username_invalid: "❌ <b>Use the bot username assigned by BotFather.</b>"
+  token_invalid: "❌ <b>Enter a valid token from BotFather.</b>"
   bot_username_occupied: "<tg-emoji emoji-id=5121063440311386962>❌</tg-emoji> <b>Dis usewnyame is awweady occupied >_<</b>"
   bot_updated: "<tg-emoji emoji-id=6318792204118656433>🎉</tg-emoji> <b>Config successfuwwy saved. Westawt usewbot to appwy changes</b>"
   this_is_halcyon: "{} <b>H-Hi! Dis is {} — powewfuw moduwaw Tewegwam usewbot. You can instaww it to youw account! ^w^</b>"

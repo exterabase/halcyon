@@ -9,11 +9,11 @@
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
 import re
-import string
 import random
 
 from halcyon_tl.tl.types import Message
 
+from ..inline.token_obtainment import BOT_TOKEN, normalize_bot_username, valid_bot_username
 from ..presentation import BANNER_URL, NAME
 
 from .. import loader, utils
@@ -69,7 +69,7 @@ class InlineStuff(loader.Module):
 
     @loader.command()
     async def ch_halcyon_bot(self, message: Message):
-        args = utils.get_args_raw(message).strip("@")
+        args = normalize_bot_username(utils.get_args_raw(message) or "")
 
         if not args:
             from .. import main
@@ -78,14 +78,7 @@ class InlineStuff(loader.Module):
             genran = "".join(random.choice(main.LATIN_MOCK))
             args = f"{genran}_{uid}_bot"
 
-        if (
-            not args.lower().endswith("bot")
-            or len(args) <= 4
-            or any(
-                litera not in (string.ascii_letters + string.digits + "_")
-                for litera in args
-            )
-        ):
+        if not valid_bot_username(args):
             await utils.answer(message, self.strings["bot_username_invalid"])
             return
 
@@ -104,10 +97,11 @@ class InlineStuff(loader.Module):
 
     @loader.command()
     async def ch_bot_token(self, message: Message):
-        args = utils.get_args_raw(message)
-        if not args or not re.match(r"[0-9]{8,10}:[a-zA-Z0-9_-]{34,36}", args):
+        args = (utils.get_args_raw(message) or "").strip()
+        if not BOT_TOKEN.fullmatch(args):
             await utils.answer(message, self.strings["token_invalid"])
             return
+        self._db.set("halcyon.inline", "custom_bot", None)
         self._db.set("halcyon.inline", "bot_token", args)
         self._db.set("halcyon.inline", "needs_inline_setup", True)
         await utils.answer(message, self.strings["bot_updated"])

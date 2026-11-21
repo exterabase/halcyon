@@ -139,7 +139,7 @@ halcyon/loaded_modules
 loaded_modules
 halcyon/debug_modules
 halcyon*.session*
-sessions
+/sessions/
 database-*.json
 *.swp
 .setup_complete

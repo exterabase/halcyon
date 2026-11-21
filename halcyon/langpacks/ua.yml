@@ -401,8 +401,8 @@ halcyon_config:
   _cfg_emoji: "Змінювати емодзі під час відкриття конфігу"
 
 inline_stuff:
-  bot_username_invalid: "<tg-emoji emoji-id=5121063440311386962>❌</tg-emoji> <b>Неправильний нік бота. Він має закінчитися на</b> <code>bot</code> <b>і бути не коротше ніж 5 символів</b>"
-  token_invalid: "<tg-emoji emoji-id=5121063440311386962>❌</tg-emoji> <b>Вказаний токен бота недійсний. Він повинен містити 8-10 цифр, </b><code>:</code> <b>і 34-36 символів</b>"
+  bot_username_invalid: "❌ <b>Use the bot username assigned by BotFather.</b>"
+  token_invalid: "❌ <b>Enter a valid token from BotFather.</b>"
   bot_username_occupied: "<tg-emoji emoji-id=5121063440311386962>❌</tg-emoji> <b>Такий нік бота вже зайнятий</b>"
   bot_updated: "<tg-emoji emoji-id=6318792204118656433>🎉</tg-emoji> <b>Налаштування збережені. Для їх застосування треба перезавантажити юзербота</b>"
   this_is_halcyon: "{} <b>Привіт! Це {} — потужний модульний Telegram юзербот. Ви можете встановити його на свій акаунт!</b>"

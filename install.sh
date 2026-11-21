@@ -16,7 +16,7 @@ fi
 is_installed() {
 	local dir="$1"
 
-	[ -f "$dir/.setup_complete" ] && [ -d "$dir/$MODULE_NAME" ] && "$dir/$VENV_DIR/bin/python" -c "import sys" >/dev/null 2>&1
+	[ -f "$dir/.setup_complete" ] && [ -d "$dir/$MODULE_NAME" ] && "$dir/$VENV_DIR/bin/python" -c "from halcyon_tl._security import SecurityGate; from halcyon_tl.sessions import SQLiteSession" >/dev/null 2>&1
 }
 
 find_root() {
@@ -107,7 +107,8 @@ install_system_packages() {
 	elif command -v apt-get >/dev/null 2>&1 && is_minimal; then
 		info "Minimal mode: installing only the required packages."
 		sudo_run apt-get update
-		sudo_run apt-get install -y git python3 python3-venv
+		sudo_run apt-get install -y --no-install-recommends \
+			ca-certificates gcc libc6-dev git python3 python3-dev python3-venv
 	elif command -v apt-get >/dev/null 2>&1; then
 		sudo_run apt-get update
 		sudo_run apt-get install -y \
@@ -217,7 +218,7 @@ prepare_repo() {
 	fi
 
 	info "Cloning repo..."
-	rm -rf "$APP_NAME"
+	[ ! -e "$APP_NAME" ] && [ ! -L "$APP_NAME" ] || fail "Directory $APP_NAME already exists. Run the installer from the project folder." 3
 	${RUN_AS_USER[@]+"${RUN_AS_USER[@]}"} git clone ${branch[@]+"${branch[@]}"} "$REPO_URL" "$APP_NAME" >>"$LOG_FILE" 2>&1 || fail "Clone failed." 3
 	cd "$APP_NAME"
 }
@@ -233,15 +234,15 @@ install_python_packages() {
 	local venv_python="$VENV_DIR/bin/python"
 
 	info "Installing Python dependencies..."
-	${RUN_AS_USER[@]+"${RUN_AS_USER[@]}"} "$venv_python" -m pip install --upgrade pip setuptools wheel >>"$LOG_FILE" 2>&1 || fail "Pip upgrade failed." 4
-	${RUN_AS_USER[@]+"${RUN_AS_USER[@]}"} "$venv_python" -m pip install --upgrade -r requirements.txt --disable-pip-version-check >>"$LOG_FILE" 2>&1 || fail "Requirements installation failed." 4
-
-	${RUN_AS_USER[@]+"${RUN_AS_USER[@]}"} "$venv_python" - >>"$LOG_FILE" 2>&1 <<'PY' || true
-import hashlib
-
-with open("requirements.txt", "rb") as f, open(".requirements_hash", "w") as h:
-    h.write(hashlib.sha256(f.read()).hexdigest())
-PY
+	if is_minimal; then
+		# Keep source builds small on Android devices with limited RAM and storage.
+		${RUN_AS_USER[@]+"${RUN_AS_USER[@]}"} env CFLAGS="${CFLAGS:--O1 -g0}" \
+			"$venv_python" -m pip install --no-cache-dir --disable-pip-version-check -r requirements.txt \
+			>>"$LOG_FILE" 2>&1 || fail "Requirements installation failed." 4
+	else
+		${RUN_AS_USER[@]+"${RUN_AS_USER[@]}"} "$venv_python" -m pip install --upgrade -r requirements.txt \
+			--disable-pip-version-check >>"$LOG_FILE" 2>&1 || fail "Requirements installation failed." 4
+	fi
 }
 
 start_app() {
@@ -250,11 +251,22 @@ start_app() {
 		exec </dev/tty
 	fi
 
-	exec ${RUN_AS_USER[@]+"${RUN_AS_USER[@]}"} "$VENV_DIR/bin/python" -m "$MODULE_NAME" "$@"
+	local platform_args=()
+	if is_minimal; then
+		platform_args+=(--no-git)
+		if [ "$(id -u)" -eq 0 ] && [ "${#RUN_AS_USER[@]}" -eq 0 ]; then
+			platform_args+=(--root)
+		fi
+	fi
+	exec ${RUN_AS_USER[@]+"${RUN_AS_USER[@]}"} "$VENV_DIR/bin/python" -m "$MODULE_NAME" "${platform_args[@]}" "$@"
 }
 
 main() {
-	if root="$(find_root)"; then
+	local script_dir
+	script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+	if [ -f "$script_dir/$MODULE_NAME/__main__.py" ]; then
+		cd "$script_dir"
+	elif root="$(find_root)"; then
 		cd "$root"
 	fi
 
@@ -266,9 +278,10 @@ main() {
 		return
 	fi
 
-	clear || true
-	printf "\033[3;38;5;177;40mInstalling %s...\033[0m\n\n" "$APP_NAME"
+	if [ -t 1 ] && [ -n "${TERM:-}" ]; then clear || true; fi
+	printf "\033[3;38;5;177;40mInstalling %s\033[0m\n\n" "$APP_NAME"
 
+	LOG_FILE="$PWD/halcyon-install.log"
 	: >"$LOG_FILE"
 
 	if [ "${SUDO_USER:-}" != "" ]; then

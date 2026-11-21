@@ -78,8 +78,12 @@ async def invite_inline_bot(
     :raise RuntimeError: If error occurred while inviting bot
     """
 
+    username = client.loader.inline.bot_username
+    if not username:
+        return
+
     try:
-        await client(InviteToChannelRequest(peer, [client.loader.inline.bot_username]))
+        await client(InviteToChannelRequest(peer, [username]))
     except Exception as e:
         raise RuntimeError(
             f"Can't invite inline bot to old asset chat, which is required by module: {e}"
@@ -89,7 +93,7 @@ async def invite_inline_bot(
         await client(
             EditAdminRequest(
                 channel=peer,
-                user_id=client.loader.inline.bot_username,
+                user_id=username,
                 admin_rights=ChatAdminRights(ban_users=True),
                 rank="halcyon.",
             )

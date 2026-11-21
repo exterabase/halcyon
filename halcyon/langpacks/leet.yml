@@ -399,8 +399,8 @@ halcyon_config:
 
 inline_stuff:
   name: "1nl1n3S7uff"
-  bot_username_invalid: "<tg-emoji emoji-id=5121063440311386962>❌</tg-emoji> <b>Sp3c1f13d b07 u53rn4m3 15 1nv4l1d. 17 mu57 3nd w17h</b> <code>bot</code> <b>& c0n741n 47 l3457 4 symb0l5</b>"
-  token_invalid: "<tg-emoji emoji-id=5121063440311386962>❌</tg-emoji> <b>Sp3c1f13d b07 70k3n 15 1nv4l1d. 17 mu57 c0n741n 8-10 numb3r5, </b><code>:</code> <b>& 34-36 symb0l5</b>"
+  bot_username_invalid: "❌ <b>Use the bot username assigned by BotFather.</b>"
+  token_invalid: "❌ <b>Enter a valid token from BotFather.</b>"
   bot_username_occupied: "<tg-emoji emoji-id=5121063440311386962>❌</tg-emoji> <b>7h15 u53rn4m3 15 4lr34dy 0ccup13d</b>"
   bot_updated: "<tg-emoji emoji-id=6318792204118656433>🎉</tg-emoji> <b>C0nf1g 5ucc355fully s4v3d. R3574r7 u53rb07 2 4pply ch4ng35</b>"
   this_is_halcyon: "{} <b>H1! 7h15 15 halcyon. — p0w3rful m0dul4r T3l3gr4m u53rb07. U c4n 1n574ll 17 2 ur 4cc!</b>"

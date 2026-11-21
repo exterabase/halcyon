@@ -30,72 +30,8 @@ class Quickstart(loader.Module):
         )
 
         try:
-            content_channel = None
-            existing_channel_id = self.db.get("halcyon.forums", "channel_id", None)
-
-            if existing_channel_id:
-                try:
-                    content_channel = await self.client.get_entity(existing_channel_id)
-                    logger.debug(
-                        f"Found existing content channel with ID {existing_channel_id}"
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"Saved channel ID {existing_channel_id} not found or inaccessible: {e}"
-                    )
-                    content_channel = None
-                    self.db.set("halcyon.forums", "forums_cache", {"halcyon-userbot": {}})
-
-            if not content_channel:
-                async for dialog in self.client.iter_dialogs():
-                    if dialog.title and "halcyon-userbot" in dialog.title.lower():
-                        content_channel = dialog.entity
-                        logger.debug(
-                            f"Found existing channel '{dialog.title}' with ID {dialog.entity.id}"
-                        )
-                        self.db.set(
-                            "halcyon.forums", "channel_id", int(dialog.entity.id)
-                        )
-                        break
-
-            if not content_channel:
-                content_channel = await self.db.ensure_content_channel()
-
-            if not content_channel:
-                raise RuntimeError("Failed to get or create content channel!")
-
-            forum_entity = None
-            existing_forum_id = self.db.get("halcyon.forums", "forum_id", None)
-
-            if existing_forum_id:
-                try:
-                    forum_entity = await self.client.get_entity(existing_forum_id)
-                except Exception:
-                    forum_entity = None
-
-            if not forum_entity:
-                try:
-                    if not (
-                        hasattr(content_channel, "forum") or not content_channel.forum
-                    ):
-                        from halcyon_tl.tl.functions.channels import ToggleForumRequest
-
-                        try:
-                            await self.client(
-                                ToggleForumRequest(
-                                    channel=content_channel,
-                                    enabled=True,
-                                )
-                            )
-                        except Exception as e:
-                            logger.debug(
-                                f"Channel might already be a forum or conversion failed: {e}"
-                            )
-
-                    forum_entity = content_channel
-                    self.db.set("halcyon.forums", "forum_id", int(content_channel.id))
-                except Exception:
-                    forum_entity = content_channel
+            content_channel = await self.db.ensure_content_channel()
+            self.db.set("halcyon.forums", "forum_id", int(content_channel.id))
 
             required_topics = [
                 (
@@ -115,7 +51,7 @@ class Quickstart(loader.Module):
                     await utils.asset_forum_topic(
                         client=self.client,
                         db=self.db,
-                        peer=forum_entity.id if forum_entity else content_channel.id,
+                        peer=content_channel.id,
                         title=topic_title,
                         description=topic_desc,
                         icon_emoji_id=emoji_id,
@@ -124,21 +60,10 @@ class Quickstart(loader.Module):
                 except Exception:
                     logger.exception(f"Failed to create/verify topic '{topic_title}'")
 
-            await utils.invite_inline_bot(self.client, content_channel)
-
+            if self.inline.init_complete:
+                await utils.invite_inline_bot(self.client, content_channel)
         except Exception:
-            logger.exception(
-                "Can't find and/or create content channel\n"
-                "This may cause several consequences, such as:\n"
-                "- Non working inline-logs, backups, assets features\n"
-                "- This error will occur every restart\n\n"
-                "You can try solving this by leaving some channels/groups"
-            )
-
-        await self.request_join(
-            "halcyon_talks",
-            "halcyon. help is only available in this chat. By agreeing to join the chat, you agree to the halcyon. federation rules and if you violate them, you will be permanently banned.",
-        )
+            logger.exception("Could not prepare the private storage channel")
 
         self.mark = lambda: [
             [

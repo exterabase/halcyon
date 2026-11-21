@@ -401,8 +401,8 @@ halcyon_config:
   _cfg_emoji: "Менять эмодзи при открытии конфига"
 
 inline_stuff:
-  bot_username_invalid: "<tg-emoji emoji-id=5121063440311386962>❌</tg-emoji> <b>Ник кривой. Должен быть с</b> <code>bot</code> <b>на конце и от 5 символов</b>"
-  token_invalid: "<tg-emoji emoji-id=5121063440311386962>❌</tg-emoji> <b>Токен паленый какой-то. Проверь цифры и буквы</b>"
+  bot_username_invalid: "❌ <b>Use the bot username assigned by BotFather.</b>"
+  token_invalid: "❌ <b>Enter a valid token from BotFather.</b>"
   bot_username_occupied: "<tg-emoji emoji-id=5121063440311386962>❌</tg-emoji> <b>Ник занят уже кем-то</b>"
   bot_updated: "<tg-emoji emoji-id=6318792204118656433>🎉</tg-emoji> <b>Сохранил. Ребутни юб чтоб заработало</b>"
   this_is_halcyon: "{} <b>Ку! Это {} — лютый юзербот. Ставь себе и кайфуй!</b>"
