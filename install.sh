@@ -245,6 +245,21 @@ install_python_packages() {
 	fi
 }
 
+refresh_transport() {
+	local venv_python="$VENV_DIR/bin/python"
+	if "$venv_python" -c '
+import runpy
+from halcyon_tl import __version__
+raise SystemExit(__version__ != runpy.run_path("vendor/telegram/halcyon_tl/version.py")["__version__"])
+'; then
+		return
+	fi
+	info "Updating MTProto library..."
+	LOG_FILE="$PWD/halcyon-install.log"
+	run ${RUN_AS_USER[@]+"${RUN_AS_USER[@]}"} env CFLAGS="${CFLAGS:--O1 -g0}" "$venv_python" \
+		-m pip install --no-cache-dir --no-deps ./vendor/telegram
+}
+
 start_app() {
 	info "Starting..."
 	if [ ! -t 0 ] && (: </dev/tty) 2>/dev/null; then
@@ -274,6 +289,7 @@ main() {
 		cd "$existing"
 		info "halcyon. is already installed, starting..."
 		switch_branch
+		refresh_transport
 		start_app "$@"
 		return
 	fi

@@ -532,7 +532,9 @@ class CommandDispatcher:
         if not message:
             return
 
-        message, _, _, func = message
+        message, _, command, func = message
+        if message.out and command in {"ping", "info"}:
+            logger.info("Executing account command %s", command)
 
         asyncio.ensure_future(
             self.future_dispatcher(

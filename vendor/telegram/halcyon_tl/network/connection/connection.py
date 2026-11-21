@@ -261,6 +261,9 @@ class Connection(abc.ABC):
         Establishes a connection with the server.
         """
         await self._connect(timeout=timeout, ssl=ssl)
+        # Packets and errors queued for the previous socket belong to that socket.
+        self._send_queue = asyncio.Queue(1)
+        self._recv_queue = asyncio.Queue(1)
         self._connected = True
 
         loop = helpers.get_running_loop()
@@ -277,8 +280,11 @@ class Connection(abc.ABC):
 
         self._connected = False
 
+        current = asyncio.current_task()
         await helpers._cancel(
-            self._log, send_task=self._send_task, recv_task=self._recv_task
+            self._log,
+            send_task=self._send_task if self._send_task is not current else None,
+            recv_task=self._recv_task if self._recv_task is not current else None,
         )
 
         if self._writer:

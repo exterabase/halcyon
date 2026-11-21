@@ -99,9 +99,10 @@ class CallbackQuery(EventBuilder):
         if isinstance(update, types.UpdateBotCallbackQuery):
             return cls.Event(update, update.peer, update.msg_id)
         elif isinstance(update, types.UpdateInlineBotCallbackQuery):
-            # See https://github.com/LonamiWebs/Telethon/pull/1005
-            # The long message ID is actually just msg_id + peer_id
-            mid, pid = struct.unpack("<ii", struct.pack("<q", update.msg_id.id))
+            if isinstance(update.msg_id, types.InputBotInlineMessageID64):
+                mid, pid = update.msg_id.id, update.msg_id.owner_id
+            else:
+                mid, pid = struct.unpack("<ii", struct.pack("<q", update.msg_id.id))
             peer = types.PeerChannel(-pid) if pid < 0 else types.PeerUser(pid)
             return cls.Event(update, peer, mid)
 

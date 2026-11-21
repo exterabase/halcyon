@@ -172,10 +172,27 @@ class TokenObtainment(InlineUnit):
                 username,
             )
             response = await _botfather_step(conv, choice)
-            if "enable" in (response.raw_text or "").lower():
-                await _botfather_step(conv, "Enabled")
-            else:
+            status = re.search(
+                r"Current value is:\s*(Enabled|Disabled)\b",
+                response.raw_text or "",
+                re.IGNORECASE,
+            )
+            if status and status[1].casefold() == "enabled":
                 await _botfather_step(conv, "/cancel")
+                return True
+
+            choices = {
+                button.text.casefold(): button.text
+                for row in (getattr(getattr(response, "reply_markup", None), "rows", ()) or ())
+                for button in row.buttons
+            }
+            if status or "enabled" in choices:
+                response = await _botfather_step(conv, choices.get("enabled", "Enabled"))
+                if "success" in (response.raw_text or "").casefold():
+                    return True
+
+            await _botfather_step(conv, "/cancel")
+            logger.warning("Inline queries enabled for @%s. Check /setinlinefeedback in BotFather.", username)
             return True
 
     async def _check_bot(self, username):

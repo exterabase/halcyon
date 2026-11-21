@@ -19,7 +19,7 @@ from io import BytesIO
 
 from halcyon_tl.tl.types import Message
 
-from ..presentation import BANNER_URL, NAME, answer_status
+from ..presentation import BANNER_URL, answer_status
 
 from .. import loader, main, utils
 from ..inline.types import InlineCall
@@ -72,7 +72,7 @@ class TestMod(loader.Module):
             ),
             loader.ConfigValue(
                 "custom_message",
-                f"<b>{NAME}</b> · <code>{{ping}}</code> ms\n<code>{{uptime}}</code>",
+                "<tg-emoji emoji-id=5920515922505765329>⚡️</tg-emoji> <b>𝙿𝚒𝚗𝚐: </b><code>{ping}</code><b> 𝚖𝚜 </b>\n<tg-emoji emoji-id=5900104897885376843>🕓</tg-emoji><b> 𝚄𝚙𝚝𝚒𝚖𝚎: </b><code>{uptime}</code>",
                 lambda: (
                     self.strings["configping"]
                     + (
@@ -381,7 +381,8 @@ class TestMod(loader.Module):
     async def ping(self, message: Message):
         """- Find out your userbot ping"""
         start = time.perf_counter_ns()
-        message = await utils.answer(message, self.config["ping_emoji"])
+        progress = await utils.answer(message, self.config["ping_emoji"])
+        message = progress or message
         data = {
             "ping": round((time.perf_counter_ns() - start) / 10**6, 3),
             "uptime": utils.formatted_uptime(),
@@ -400,3 +401,11 @@ class TestMod(loader.Module):
             logger.exception("Missing placeholder in custom_message")
             placeholders_msg = "<tg-emoji emoji-id=5121063440311386962>❌</tg-emoji>"
         await answer_status(message, placeholders_msg, self.config)
+
+    async def inline_ready(self):
+        channel_id = self._db.get("halcyon.forums", "channel_id")
+        if channel_id is None:
+            return
+        self.logchat = int(f"-100{channel_id}")
+        logging.getLogger().handlers[0].install_tg_log(self)
+        self._pass_config_to_logger()

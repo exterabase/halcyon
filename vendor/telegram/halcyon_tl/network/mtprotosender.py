@@ -317,6 +317,7 @@ class MTProtoSender:
             await self._disconnect(error=e)
             raise e
 
+        self._reconnecting = False
         loop = helpers.get_running_loop()
         self._log.debug("Starting send loop")
         self._send_loop_handle = loop.create_task(self._send_loop())
@@ -417,14 +418,9 @@ class MTProtoSender:
             recv_loop_handle=self._recv_loop_handle,
         )
 
-        # TODO See comment in `_start_reconnect`
-        # Perhaps this should be the last thing to do?
-        # But _connect() creates tasks which may run and,
-        # if they see that reconnecting is True, they will end.
-        # Perhaps that task creation should not belong in connect?
-        self._reconnecting = False
-
-        # Start with a clean state (and thus session ID) to avoid old msgs
+        self._ping = None
+        self._pending_ack.clear()
+        self._last_acks.clear()
         self._state.reset()
 
         retries = self._retries if self._auto_reconnect else 0

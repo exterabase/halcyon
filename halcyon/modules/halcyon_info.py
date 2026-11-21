@@ -199,10 +199,7 @@ class HalcyonInfoMod(loader.Module):
 
     async def _render_info(self, start: int) -> str:
         custom_message = self.config["custom_message"]
-        template = custom_message or (
-            f"<b>{NAME}</b> · {self.strings['status_title']}\n\n"
-            + self.strings["status_fields"]
-        )
+        template = custom_message or self.strings["info_message"]
         required = set(re.findall(r"{(\w+)}", template))
         providers = self._get_placeholder_providers()
         data = utils.LazyPlaceholderData(providers)
@@ -214,13 +211,19 @@ class HalcyonInfoMod(loader.Module):
         if custom_message:
             data = await utils.get_placeholders(data, custom_message)
             return self._format_custom_message(custom_message, data)
-        return template.format(**data)
+        return template.format(
+            utils.get_platform_emoji()
+            if self._client.halcyon_me.premium and self.config.get("show_halcyon", False)
+            else "",
+            **data,
+        )
 
     @loader.command()
     async def infocmd(self, message: Message):
         start = time.perf_counter_ns()
         if "{ping}" in (self.config["custom_message"] or ""):
-            message = await utils.answer(message, self.config["ping_emoji"])
+            progress = await utils.answer(message, self.config["ping_emoji"])
+            message = progress or message
         await answer_status(message, await self._render_info(start), self.config)
 
     @loader.command()

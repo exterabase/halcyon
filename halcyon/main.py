@@ -1046,16 +1046,9 @@ class Halcyon:
             pref = client.halcyon_db.get("halcyon.main", "command_prefix", None)
 
             logo = (
-                "                          _           \n"
-                r"  /\  /\ ___  _ __  ___  | | __ _   _ "
-                "\n"
-                r" / /_/ // _ \| '__|/ _ \ | |/ /| | | |"
-                "\n"
-                "/ __  /|  __/| |  | (_) ||   < | |_| |\n"
-                r"\/ /_/  \___||_|   \___/ |_|\_\ \__,_|"
-                "\n\n"
+                "halcyon.\n"
                 f"• Build: {build[:7]}\n"
-                f"• Version: {'.'.join(list(map(str, list(__version__))))}\n"
+                f"• Version: {'.'.join(map(str, __version__))}\n"
                 f"• {upd}\n"
             )
             if not self.omit_log:
@@ -1185,6 +1178,13 @@ class Halcyon:
 
         await modules.send_ready()
         await modules.send_inline_ready()
+
+        prefix = modules.get_prefix()
+        logging.info("halcyon. ready. Account commands: %sping, %sinfo", prefix, prefix)
+        if modules.inline.init_complete:
+            logging.info("Inline bot: @%s", modules.inline.bot_username)
+        else:
+            logging.warning("Inline bot unavailable")
 
         if first:
             await self._badge(client)

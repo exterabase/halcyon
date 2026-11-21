@@ -111,9 +111,31 @@ class InlineStuff(loader.Module):
             case "/start":
                 await message.answer_photo(
                     BANNER_URL,
-                    caption=f"<b>{NAME}</b>",
+                    caption=self.strings["this_is_halcyon"].format(
+                        (
+                            "<tg-emoji emoji-id=5463379725441341739>🪐</tg-emoji>"
+                            if self._client.halcyon_me.premium is True
+                            else "🪐"
+                        ),
+                        utils.get_platform_emoji() if self._client.halcyon_me.premium is True else NAME,
+                    ),
                     reply_markup=self.inline.generate_markup(
-                        {"text": "GitHub", "url": "https://github.com/exterabase/halcyon"}
+                        markup_obj=[
+                            [
+                                {
+                                    "text": "GitHub",
+                                    "url": "https://github.com/exterabase/halcyon",
+                                    "emoji_id": "5231065262228250587",
+                                }
+                            ],
+                            [
+                                {
+                                    "text": self.strings["support_chat_caption"],
+                                    "url": "https://github.com/exterabase/halcyon/issues",
+                                    "emoji_id": "5363805650327450240",
+                                }
+                            ],
+                        ]
                     ),
                 )
             case "/profile":

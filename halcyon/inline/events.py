@@ -344,6 +344,15 @@ class Events(InlineUnit):
             )
             return
 
+        if (
+            user_id == self._me
+            and isinstance(call_data, str)
+            and len(call_data) == 30
+            and call_data.isascii()
+            and call_data.isalnum()
+        ):
+            await call.answer("This button expired. Open the menu again.", alert=True)
+
     async def _chosen_inline_handler(
         self: "InlineManager",
         chosen_inline_query,
