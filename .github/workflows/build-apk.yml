@@ -1,0 +1,44 @@
+name: Build Halcyon APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64,amd64
+
+      - uses: docker/setup-buildx-action@v3
+        with:
+          install: true
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platforms;android-35 build-tools;35.0.0
+
+      - name: Build APK
+        env:
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
+        run: bash android/build.sh
+
+      - name: Verify APK version
+        env:
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
+        run: |
+          test -f android/build/Halcyon.apk
+          $ANDROID_SDK_ROOT/build-tools/35.0.0/aapt dump badging android/build/Halcyon.apk | grep "versionName='1.0.0'"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Halcyon-1.0.0
+          path: android/build/Halcyon.apk
